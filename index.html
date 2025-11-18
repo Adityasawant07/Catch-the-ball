@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Catch the Ball</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Added 'Bungee' font for the title */
+        @import url('https://fonts.googleapis.com/css2?family=Bungee&family=Press+Start+2P&family=Roboto:wght@400;700&display=swap');
+
+        body {
+            /* Changed from solid dark gray to a spotlight effect */
+            background: radial-gradient(circle at center, #2d3748 0%, #1a202c 100%);
+            overflow: hidden; /* Prevent scrolling */
+            font-family: 'Roboto', sans-serif;
+            touch-action: none; /* Prevent pull-to-refresh on mobile */
+        }
+
+        #game-container {
+            position: relative;
+            box-shadow: 0 0 50px rgba(0, 0, 0, 0.5);
+            /* Ensure the sky blue gradient is always visible */
+            background: linear-gradient(to bottom, #87CEEB, #E0F7FA);
+            overflow: hidden;
+            cursor: default; /* Mouse is visible */
+            /* FIX: Ensure the game fits on screen without cutting off the bottom */
+            max-height: 95vh;
+            max-width: 95vw;
+            aspect-ratio: 3/4;
+            width: auto;
+            height: auto;
+        }
+
+        canvas {
+            /* FIX: Force canvas to fill the container */
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        /* Retro Font for UI elements */
+        .retro-text {
+            font-family: 'Press Start 2P', cursive;
+            text-shadow: 2px 2px 0px #000;
+        }
+
+        /* New Title Font Class */
+        .title-font {
+            font-family: 'Bungee', cursive;
+            text-shadow: 4px 4px 0px #000; /* Thicker shadow for the bold title */
+            letter-spacing: 2px;
+        }
+
+        /* UI Overlay Styling */
+        .ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* Let clicks pass through to canvas usually */
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 10;
+        }
+
+        .interactive {
+            pointer-events: auto; /* Re-enable clicks for buttons */
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        /* Floating Score Animation Class */
+        .floater {
+            position: absolute;
+            color: #fff;
+            font-weight: bold;
+            font-size: 20px;
+            animation: floatUp 1s ease-out forwards;
+            text-shadow: 1px 1px 0 #000;
+            pointer-events: none;
+        }
+
+        @keyframes floatUp {
+            0% { opacity: 1; transform: translateY(0) scale(1); }
+            100% { opacity: 0; transform: translateY(-50px) scale(1.5); }
+        }
+    </style>
+</head>
+<body class="h-screen w-screen flex items-center justify-center">
+
+    <!-- Main Game Container -->
+    <div id="game-container" class="rounded-lg border-4 border-slate-700 flex justify-center">
+        <canvas id="gameCanvas"></canvas>
+
+        <!-- HUD (Heads Up Display) -->
+        <div id="hud" class="absolute top-0 left-0 w-full p-4 flex justify-between items-start pointer-events-none">
+            <div class="text-white text-xl retro-text">SCORE: <span id="scoreDisplay">0</span></div>
+            <div class="text-white text-xs sm:text-sm text-right retro-text">
+                HIGH: <span id="highScoreDisplay">0</span><br>
+                LIVES: <span id="livesDisplay">❤️❤️❤️</span>
+            </div>
+        </div>
+
+        <!-- Start Screen - Changed to lighter semi-transparent blue -->
+        <div id="start-screen" class="ui-layer interactive bg-slate-900/60 backdrop-blur-sm">
+            <!-- Updated Title with new Font Class -->
+            <h1 class="text-5xl md:text-7xl text-yellow-400 mb-4 title-font text-center leading-tight drop-shadow-lg">
+                CATCH<br>THE BALL
+            </h1>
+            <p class="text-white mb-8 text-lg animate-pulse retro-text text-xs">Catch Balls. Avoid Bombs.</p>
+            <button id="startBtn" class="bg-green-500 hover:bg-green-600 text-white font-bold py-4 px-8 rounded shadow-[0_4px_0_rgb(20,83,45)] active:shadow-[0_0px_0_rgb(20,83,45)] active:translate-y-1 transition-all retro-text text-sm md:text-base">
+                START GAME
+            </button>
+            <p class="text-gray-200 mt-6 text-xs retro-text" style="font-size: 10px;">Mouse / Touch / Arrow Keys</p>
+            <p class="text-cyan-300 mt-4 text-xs retro-text" style="font-size: 10px;">Made by Aditya Sawant</p>
+        </div>
+
+        <!-- Game Over Screen - Changed to semi-transparent red -->
+        <div id="game-over-screen" class="ui-layer interactive bg-red-900/70 backdrop-blur-sm hidden">
+            <h2 class="text-4xl md:text-5xl text-white mb-2 title-font text-center">GAME OVER</h2>
+            <div class="text-yellow-300 text-xl mb-6 retro-text">Score: <span id="finalScore">0</span></div>
+            <button id="restartBtn" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-4 px-8 rounded shadow-[0_4px_0_rgb(30,58,138)] active:shadow-[0_0px_0_rgb(30,58,138)] active:translate-y-1 transition-all retro-text text-sm md:text-base">
+                TRY AGAIN
+            </button>
+        </div>
+    </div>
+
+<script>
+/**
+ * CATCH THE BALL
+ * A complete HTML5 Canvas game engine in a single file.
+ */
+
+// --- Configuration ---
+const CONFIG = {
+    width: 600,
+    height: 800,
+    playerSpeed: 8,
+    playerWidth: 100,
+    playerHeight: 20,
+    gravity: 0.15,
+    initialSpawnRate: 60, // Frames between spawns
+    difficultyRamp: 0.05, // How much spawn rate decreases per catch
+    bombChance: 0.2, // 20% chance a falling object is a bomb
+    colors: {
+        player: '#3B82F6', // Blue
+        ball: '#EF4444',   // Red
+        gold: '#F59E0B',   // Gold
+        bomb: '#1f2937'    // Dark Gray
+    }
+};
+
+// --- State Management ---
+const state = {
+    isRunning: false,
+    isGameOver: false,
+    score: 0,
+    highScore: parseInt(localStorage.getItem('superCatchHighScore')) || 0,
+    lives: 3,
+    frameCount: 0,
+    spawnRate: CONFIG.initialSpawnRate,
+    difficultyMultiplier: 1
+};
+
+// --- DOM Elements ---
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const container = document.getElementById('game-container');
+const startScreen = document.getElementById('start-screen');
+const gameOverScreen = document.getElementById('game-over-screen');
+const scoreEl = document.getElementById('scoreDisplay');
+const highScoreEl = document.getElementById('highScoreDisplay');
+const livesEl = document.getElementById('livesDisplay');
+const finalScoreEl = document.getElementById('finalScore');
+const startBtn = document.getElementById('startBtn');
+const restartBtn = document.getElementById('restartBtn');
+
+// --- Audio Context (Synthesizer for sound effects) ---
+const AudioContext = window.AudioContext || window.webkitAudioContext;
+let audioCtx;
+
+function initAudio() {
+    if (!audioCtx) audioCtx = new AudioContext();
+}
+
+function playSound(type) {
+    if (!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gainNode = audioCtx.createGain();
+    osc.connect(gainNode);
+    gainNode.connect(audioCtx.destination);
+
+    if (type === 'catch') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(400, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(800, audioCtx.currentTime + 0.1);
+        gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.1);
+    } else if (type === 'bomb') {
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(100, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(50, audioCtx.currentTime + 0.3);
+        gainNode.gain.setValueAtTime(0.2, audioCtx.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.3);
+    } else if (type === 'gameover') {
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(300, audioCtx.currentTime);
+        osc.frequency.linearRampToValueAtTime(50, audioCtx.currentTime + 0.5);
+        gainNode.gain.setValueAtTime(0.2, audioCtx.currentTime);
+        gainNode.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.5);
+    }
+}
+
+// --- Game Entities ---
+
+class Player {
+    constructor() {
+        this.width = CONFIG.playerWidth;
+        this.height = CONFIG.playerHeight;
+        // Initial positions will be corrected by resize()
+        this.x = 0; 
+        this.y = 0;
+        this.targetX = this.x;
+        this.color = CONFIG.colors.player;
+    }
+
+    update() {
+        // Smooth lerp movement towards target (mouse/touch position)
+        this.x += (this.targetX - this.x) * 0.2;
+        
+        // Boundary checking
+        if (this.x < 0) this.x = 0;
+        if (this.x + this.width > canvas.width) this.x = canvas.width - this.width;
+    }
+
+    draw() {
+        ctx.fillStyle = this.color;
+        // Draw rounded rectangle
+        ctx.beginPath();
+        ctx.roundRect(this.x, this.y, this.width, this.height, 10);
+        ctx.fill();
+        
+        // Detail: Little handle to look like a basket tray
+        ctx.fillStyle = 'rgba(0,0,0,0.2)';
+        ctx.fillRect(this.x + 5, this.y + 5, this.width - 10, this.height - 10);
+    }
+}
+
+class FallingObject {
+    constructor() {
+        this.radius = 15;
+        this.x = Math.random() * (canvas.width - this.radius * 2) + this.radius;
+        this.y = -50;
+        // Variable speed based on difficulty
+        this.speed = (Math.random() * 3 + 2) + (state.difficultyMultiplier * 0.5);
+        
+        // Determine type
+        const rand = Math.random();
+        if (rand < 0.05) {
+            this.type = 'gold'; // Rare high points
+            this.value = 50;
+            this.color = CONFIG.colors.gold;
+            this.speed *= 1.5; // Gold falls faster
+        } else if (rand < 0.05 + CONFIG.bombChance) {
+            this.type = 'bomb'; // Avoid
+            this.value = 0;
+            this.color = CONFIG.colors.bomb;
+        } else {
+            this.type = 'normal'; // Standard catch
+            this.value = 10;
+            this.color = CONFIG.colors.ball;
+        }
+
+        this.markedForDeletion = false;
+        this.rotation = 0;
+    }
+
+    update() {
+        this.y += this.speed;
+        this.rotation += 0.1;
+
+        // Floor collision (Missed)
+        if (this.y > canvas.height + this.radius) {
+            this.markedForDeletion = true;
+            if (this.type === 'normal') {
+                // Only lose life on normal ball miss
+                loseLife(); 
+            }
+        }
+    }
+
+    draw() {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.rotate(this.rotation);
+        
+        if (this.type === 'bomb') {
+            // Draw Bomb
+            ctx.fillStyle = 'black';
+            ctx.beginPath();
+            ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
+            ctx.fill();
+            // Fuse
+            ctx.strokeStyle = '#eda55d';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(0, -this.radius);
+            ctx.quadraticCurveTo(5, -25, 10, -20);
+            ctx.stroke();
+            // Spark
+            ctx.fillStyle = 'orange';
+            ctx.beginPath();
+            ctx.arc(10, -20, 3, 0, Math.PI*2);
+            ctx.fill();
+        } else {
+            // Draw Ball
+            ctx.fillStyle = this.color;
+            ctx.beginPath();
+            ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
+            ctx.fill();
+            // Shine effect
+            ctx.fillStyle = 'rgba(255,255,255,0.4)';
+            ctx.beginPath();
+            ctx.arc(-5, -5, this.radius/3, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        
+        ctx.restore();
+    }
+}
+
+class Particle {
+    constructor(x, y, color) {
+        this.x = x;
+        this.y = y;
+        this.color = color;
+        this.size = Math.random() * 5 + 2;
+        this.speedX = Math.random() * 6 - 3;
+        this.speedY = Math.random() * 6 - 3;
+        this.life = 1; // Opacity 1.0 to 0.0
+    }
+
+    update() {
+        this.x += this.speedX;
+        this.y += this.speedY;
+        this.life -= 0.02;
+        if (this.life < 0) this.life = 0;
+    }
+
+    draw() {
+        ctx.fillStyle = this.color;
+        ctx.globalAlpha = this.life;
+        ctx.fillRect(this.x, this.y, this.size, this.size);
+        ctx.globalAlpha = 1.0;
+    }
+}
+
+// --- Global Arrays ---
+let objects = [];
+let particles = [];
+const player = new Player();
+
+// --- Game Logic Functions ---
+
+function resize() {
+    // Set internal resolution to a fixed 600x800
+    // CSS will handle the display scaling
+    canvas.width = 600;
+    canvas.height = 800;
+
+    // FIX: Ensure player is always at the bottom when resized/initialized
+    player.y = canvas.height - player.height - 20;
+    // Ensure player is horizontally valid
+    if (player.x > canvas.width - player.width) player.x = canvas.width - player.width;
+}
+
+function spawnObject() {
+    objects.push(new FallingObject());
+}
+
+function createExplosion(x, y, color) {
+    for (let i = 0; i < 15; i++) {
+        particles.push(new Particle(x, y, color));
+    }
+}
+
+function showFloatingText(x, y, text) {
+    const el = document.createElement('div');
+    el.className = 'floater';
+    el.textContent = text;
+    el.style.left = (x / canvas.width * 100) + '%';
+    el.style.top = (y / canvas.height * 100) + '%';
+    container.appendChild(el);
+    setTimeout(() => el.remove(), 1000);
+}
+
+function loseLife() {
+    state.lives--;
+    updateHUD();
+    playSound('bomb'); // Use bomb sound for life loss (negative feedback)
+    
+    // Screen shake effect
+    container.style.transform = `translate(${Math.random()*10-5}px, ${Math.random()*10-5}px)`;
+    setTimeout(() => container.style.transform = 'translate(0,0)', 100);
+
+    if (state.lives <= 0) {
+        endGame();
+    }
+}
+
+function updateHUD() {
+    scoreEl.textContent = state.score;
+    highScoreEl.textContent = state.highScore;
+    livesEl.textContent = '❤️'.repeat(Math.max(0, state.lives));
+}
+
+function checkCollisions() {
+    for (let i = 0; i < objects.length; i++) {
+        let obj = objects[i];
+        
+        // Simple AABB collision detection (Rectangle vs Circle approx)
+        // Check if ball is within player horizontal range
+        if (obj.y + obj.radius >= player.y && 
+            obj.y - obj.radius <= player.y + player.height &&
+            obj.x >= player.x && 
+            obj.x <= player.x + player.width) {
+                
+            // Collision!
+            obj.markedForDeletion = true;
+            
+            if (obj.type === 'bomb') {
+                loseLife();
+                createExplosion(obj.x, obj.y, '#555');
+            } else {
+                // Successful Catch
+                state.score += obj.value;
+                playSound('catch');
+                createExplosion(obj.x, obj.y, obj.color);
+                showFloatingText(obj.x, obj.y, `+${obj.value}`);
+                
+                // Increase difficulty slightly
+                state.difficultyMultiplier += 0.05;
+                if (state.spawnRate > 20) state.spawnRate -= 0.5;
+                
+                updateHUD();
+            }
+        }
+    }
+}
+
+function gameLoop() {
+    if (!state.isRunning) return;
+
+    // 1. Clear Screen
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // 2. Spawn Logic
+    state.frameCount++;
+    if (state.frameCount % Math.floor(state.spawnRate) === 0) {
+        spawnObject();
+    }
+
+    // 3. Update & Draw Player
+    player.update();
+    player.draw();
+
+    // 4. Update & Draw Objects
+    objects.forEach(obj => {
+        obj.update();
+        obj.draw();
+    });
+
+    // 5. Update & Draw Particles
+    particles.forEach(p => {
+        p.update();
+        p.draw();
+    });
+
+    // 6. Clean up arrays
+    objects = objects.filter(obj => !obj.markedForDeletion);
+    particles = particles.filter(p => p.life > 0);
+
+    // 7. Checks
+    checkCollisions();
+
+    requestAnimationFrame(gameLoop);
+}
+
+function startGame() {
+    initAudio();
+    state.isRunning = true;
+    state.isGameOver = false;
+    state.score = 0;
+    state.lives = 3;
+    state.frameCount = 0;
+    state.spawnRate = CONFIG.initialSpawnRate;
+    state.difficultyMultiplier = 1;
+    
+    objects = [];
+    particles = [];
+    
+    updateHUD();
+    
+    startScreen.classList.add('hidden');
+    gameOverScreen.classList.add('hidden');
+    container.style.cursor = 'default'; /* Changed from none to default */
+    
+    gameLoop();
+}
+
+function endGame() {
+    state.isRunning = false;
+    state.isGameOver = true;
+    playSound('gameover');
+    
+    if (state.score > state.highScore) {
+        state.highScore = state.score;
+        localStorage.setItem('superCatchHighScore', state.highScore);
+    }
+    
+    finalScoreEl.textContent = state.score;
+    highScoreEl.textContent = state.highScore;
+    
+    container.style.cursor = 'default';
+    gameOverScreen.classList.remove('hidden');
+}
+
+// --- Input Handling ---
+
+function handleInput(clientX) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    
+    // Calculate mouse position relative to canvas
+    let x = (clientX - rect.left) * scaleX;
+    
+    // Center player on mouse
+    player.targetX = x - player.width / 2;
+}
+
+// Mouse
+window.addEventListener('mousemove', (e) => {
+    if (state.isRunning) handleInput(e.clientX);
+});
+
+// Touch
+window.addEventListener('touchmove', (e) => {
+    if (state.isRunning) {
+        e.preventDefault(); // Prevent scrolling
+        handleInput(e.touches[0].clientX);
+    }
+}, { passive: false });
+
+window.addEventListener('touchstart', (e) => {
+     if (state.isRunning) handleInput(e.touches[0].clientX);
+}, { passive: false });
+
+// Keyboard (Arrow keys)
+window.addEventListener('keydown', (e) => {
+    if (!state.isRunning) return;
+    const speed = 40;
+    if (e.key === 'ArrowLeft') player.targetX -= speed;
+    if (e.key === 'ArrowRight') player.targetX += speed;
+});
+
+// Resize handling
+window.addEventListener('resize', () => {
+    resize();
+    // Force re-render of HUD
+    updateHUD(); 
+});
+
+// Button Listeners
+startBtn.addEventListener('click', startGame);
+restartBtn.addEventListener('click', startGame);
+
+// Initial Setup
+resize();
+updateHUD();
+
+// Simple animation loop for the start screen background (optional aesthetic)
+function menuLoop() {
+    if (!state.isRunning) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        // Draw a simple bouncing ball in background
+        let t = Date.now() / 1000;
+        ctx.fillStyle = 'rgba(255,255,255,0.1)';
+        ctx.beginPath();
+        ctx.arc(canvas.width/2 + Math.sin(t)*100, canvas.height/2 + Math.cos(t*1.5)*100, 20, 0, Math.PI*2);
+        ctx.fill();
+    }
+    requestAnimationFrame(menuLoop);
+}
+menuLoop();
+
+</script>
+</body>
+</html>
